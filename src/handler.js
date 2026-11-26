@@ -4,10 +4,26 @@ import * as store from './store.js'
 import { commands, byName } from './commands/index.js'
 import { digits, textOf, getMeta, isAdminIn } from './utils.js'
 
+// Each message may run a command only once. WhatsApp can deliver the same message more than once
+// (a retry after a decrypt error, or both as 'notify' and 'append'), and after a restart it replays
+// messages the bot already answered. So: remember handled message ids, and ignore anything older than this start.
+const BOOT = Date.now() / 1000
+const handled = new Map()
+function alreadyHandled(msg) {
+  const now = Date.now()
+  for (const [id, t] of handled) if (now - t > 600_000) handled.delete(id)
+  const id = `${msg.key.remoteJid}|${msg.key.id}`
+  if (handled.has(id)) return true
+  handled.set(id, now)
+  return false
+}
+
 export async function handle(sock, msg) {
   if (!msg.message || msg.key.remoteJid === 'status@broadcast') return
   const text = textOf(msg).trim()
   if (!text.startsWith(prefix())) return
+  if (Number(msg.messageTimestamp || 0) < BOOT - 15) return // sent before the bot started: already answered, or too old to matter
+  if (alreadyHandled(msg)) return
 
   const [name, ...args] = text.slice(prefix().length).trim().split(/\s+/)
   const cmd = byName.get(name.toLowerCase())
