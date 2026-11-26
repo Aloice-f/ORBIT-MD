@@ -128,6 +128,7 @@ async function ytdlp(args) {
   const bin = await ensureYtdlp()
   const base = ['--no-playlist', '--no-warnings', '--no-progress']
   if (fs.existsSync('cookies.txt')) base.push('--cookies', 'cookies.txt')
+  if (process.env.YT_PROXY) base.push('--proxy', process.env.YT_PROXY)
   try {
     return await execBuf(bin, [...base, '--js-runtimes', 'node', ...args]) // newer yt-dlp uses node to solve YouTube's player checks
   } catch (e) {
@@ -149,12 +150,13 @@ const YT_FORMATS = {
 }
 const ytdlpDownload = (url, kind) => ytdlp([...YT_FORMATS[kind], '-o', '-', url])
 
-/** yt-dlp first; if it fails, fall back to ytdl-core. Throws a readable message when both fail. */
-async function fetchYoutube(url, kind) {
+/** yt-dlp first, then ytdl-core, then (for song names only) SoundCloud. Returns { data, mime }. Throws a readable message if all fail. */
+async function fetchYoutube(url, kind, query) {
+  const mime = kind === 'audio' ? 'audio/mp4' : 'video/mp4'
   let first
   try {
     const data = await ytdlpDownload(url, kind)
-    if (data.length) return data
+    if (data.length) return { data, mime }
     first = new Error('YouTube returned an empty file')
   } catch (e) {
     first = e
@@ -164,11 +166,20 @@ async function fetchYoutube(url, kind) {
     const media = await ytMedia(url, kind === 'audio'
       ? (ytdl, info) => { try { return ytdl.chooseFormat(info.formats, { quality: '140' }) } catch { return ytdl.chooseFormat(info.formats, { quality: 'highestaudio' }) } }
       : (ytdl, info) => { try { return ytdl.chooseFormat(info.formats, { quality: '18' }) } catch { return ytdl.chooseFormat(info.formats, { quality: 'lowest', filter: 'audioandvideo' }) } })
-    return await ytDownload(media)
+    return { data: await ytDownload(media), mime }
   } catch (e2) {
     console.error('ytdl-core fallback failed:', e2.message)
-    throw new Error(explainYoutube(first))
   }
+  if (kind === 'audio' && query) {
+    try {
+      // SoundCloud does not block hosting IPs the way YouTube does. mp3 only, so the file type is known.
+      const data = await ytdlp(['-f', 'bestaudio[ext=mp3]', '--max-filesize', '40M', '-o', '-', `scsearch1:${query}`])
+      if (data.length) return { data, mime: 'audio/mpeg' }
+    } catch (e3) {
+      console.error('SoundCloud fallback failed:', e3.message)
+    }
+  }
+  throw new Error(explainYoutube(first))
 }
 
 function explainYoutube(e) {
@@ -227,8 +238,8 @@ export default [
         if (!v) return reply('I could not find that song.')
         if (v.seconds > 900) return reply('That is longer than 15 minutes. Pick something shorter.')
         await reply(`Downloading: ${v.title}`)
-        const audio = await fetchYoutube(v.url, 'audio')
-        await sock.sendMessage(jid, { audio, mimetype: 'audio/mp4', fileName: v.title + '.m4a' }, { quoted: msg })
+        const { data, mime } = await fetchYoutube(v.url, 'audio', /^https?:\/\//.test(text) ? null : text)
+        await sock.sendMessage(jid, { audio: data, mimetype: mime, fileName: v.title + (mime === 'audio/mpeg' ? '.mp3' : '.m4a') }, { quoted: msg })
       } catch (e) {
         console.error('play failed:', e)
         throw new Error(explainYoutube(e))
@@ -244,8 +255,8 @@ export default [
         if (!v) return reply('I could not find that video.')
         if (v.seconds > 600) return reply('That is longer than 10 minutes. Pick something shorter so the file stays a reasonable size.')
         await reply(`Downloading: ${v.title}`)
-        const video = await fetchYoutube(v.url, 'video')
-        await sock.sendMessage(jid, { video, mimetype: 'video/mp4', caption: v.title }, { quoted: msg })
+        const { data } = await fetchYoutube(v.url, 'video')
+        await sock.sendMessage(jid, { video: data, mimetype: 'video/mp4', caption: v.title }, { quoted: msg })
       } catch (e) {
         console.error('video failed:', e)
         throw new Error(explainYoutube(e))
