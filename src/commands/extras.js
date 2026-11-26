@@ -1,9 +1,11 @@
+import fs from 'node:fs'
 import pino from 'pino'
 import { downloadMediaMessage } from '@whiskeysockets/baileys'
 import { config } from '../config.js'
 import { quotedOf } from '../utils.js'
 
 const logger = pino({ level: 'silent' })
+process.env.YTDL_NO_UPDATE ??= '1' // skip ytdl-core's own update check; it only adds delay and console noise
 const AI = process.env.AI_BASE_URL || 'https://text.pollinations.ai'
 const IMG = process.env.AI_IMAGE_URL || 'https://image.pollinations.ai/prompt'
 
@@ -26,14 +28,58 @@ async function firstVideo(query) {
 function explainYtdlError(e) {
   const m = e?.message || String(e)
   if (/Could not extract functions|Could not parse decipher|n transform/i.test(m))
-    return 'YouTube changed something on their end and the ytdl-core library has not caught up yet. Fix: `npm install @distube/ytdl-core@latest` on the host and restart the bot.'
+    return 'YouTube changed something on their end and the ytdl-core library has not caught up yet. Update the library (`npm install @distube/ytdl-core@latest`) and restart.'
   if (/Sign in to confirm|bot/i.test(m))
-    return 'YouTube is blocking this as a bot/age/region check. This usually needs cookies set up for ytdl-core, or try a different video.'
+    return 'YouTube is blocking this as a bot/age/region check. The host IP is being blocked. Add YouTube cookies (YT_COOKIES variable or cookies.json) or try a different video.'
   if (/410|403|Status code/i.test(m))
     return 'YouTube rejected the download request (blocked IP or stale library version). Try `npm install @distube/ytdl-core@latest` first.'
   if (/No such format found|format/i.test(m))
     return 'That video has no audio/video format ytdl-core recognizes. Try a different video.'
   return m
+}
+
+
+// YouTube blocks many hosting IPs and changes its player often, so a single attempt fails a lot.
+// This tries several "player clients" in turn and stops at the first one that returns a usable format.
+// Optional: put exported YouTube cookies (JSON array) in the YT_COOKIES variable or a cookies.json file
+// next to package.json. That fixes the "Sign in to confirm you're not a bot" block on most hosts.
+let ytAgent
+function getAgent(ytdl) {
+  if (ytAgent !== undefined) return ytAgent
+  ytAgent = null
+  try {
+    const raw = process.env.YT_COOKIES || (fs.existsSync('cookies.json') ? fs.readFileSync('cookies.json', 'utf8') : '')
+    if (raw.trim()) ytAgent = ytdl.createAgent(JSON.parse(raw))
+  } catch (e) {
+    console.error('YouTube cookies ignored (bad JSON?):', e.message)
+  }
+  return ytAgent
+}
+
+async function ytMedia(url, pickFormat) {
+  const ytdl = (await import('@distube/ytdl-core')).default
+  const agent = getAgent(ytdl)
+  let lastErr
+  for (const playerClients of [undefined, ['IOS', 'ANDROID'], ['TV'], ['WEB_EMBEDDED']]) {
+    try {
+      const opts = {}
+      if (agent) opts.agent = agent
+      if (playerClients) opts.playerClients = playerClients
+      const info = await ytdl.getInfo(url, opts)
+      const format = pickFormat(ytdl, info)
+      return { ytdl, info, format, agent }
+    } catch (e) {
+      lastErr = e
+      console.error(`YouTube attempt (${playerClients?.join('+') || 'default'}) failed:`, e.message)
+    }
+  }
+  throw lastErr || new Error('No usable format found')
+}
+
+async function ytDownload({ ytdl, info, format, agent }) {
+  const chunks = []
+  for await (const c of ytdl.downloadFromInfo(info, agent ? { format, agent } : { format })) chunks.push(c)
+  return Buffer.concat(chunks)
 }
 
 export default [
@@ -75,15 +121,14 @@ export default [
       try {
         const url = /^https?:\/\//.test(text) ? text : (await firstVideo(text))?.url
         if (!url) return reply('I could not find that song.')
-        const ytdl = (await import('@distube/ytdl-core')).default
-        const info = await ytdl.getInfo(url)
-        if (Number(info.videoDetails.lengthSeconds) > 900) return reply('That is longer than 15 minutes. Pick something shorter.')
-        await reply(`Downloading: ${info.videoDetails.title}`)
-        let format
-        try { format = ytdl.chooseFormat(info.formats, { quality: '140' }) } catch { format = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' }) }
-        const chunks = []
-        for await (const c of ytdl.downloadFromInfo(info, { format })) chunks.push(c)
-        await sock.sendMessage(jid, { audio: Buffer.concat(chunks), mimetype: 'audio/mp4', fileName: info.videoDetails.title + '.m4a' }, { quoted: msg })
+        const media = await ytMedia(url, (ytdl, info) => {
+          try { return ytdl.chooseFormat(info.formats, { quality: '140' }) } catch { return ytdl.chooseFormat(info.formats, { quality: 'highestaudio' }) }
+        })
+        const { title, lengthSeconds } = media.info.videoDetails
+        if (Number(lengthSeconds) > 900) return reply('That is longer than 15 minutes. Pick something shorter.')
+        await reply(`Downloading: ${title}`)
+        const audio = await ytDownload(media)
+        await sock.sendMessage(jid, { audio, mimetype: 'audio/mp4', fileName: title + '.m4a' }, { quoted: msg })
       } catch (e) {
         console.error('play failed:', e)
         throw new Error(explainYtdlError(e))
@@ -97,15 +142,14 @@ export default [
       try {
         const url = /^https?:\/\//.test(text) ? text : (await firstVideo(text))?.url
         if (!url) return reply('I could not find that video.')
-        const ytdl = (await import('@distube/ytdl-core')).default
-        const info = await ytdl.getInfo(url)
-        if (Number(info.videoDetails.lengthSeconds) > 600) return reply('That is longer than 10 minutes. Pick something shorter so the file stays a reasonable size.')
-        await reply(`Downloading: ${info.videoDetails.title}`)
-        let format
-        try { format = ytdl.chooseFormat(info.formats, { quality: '18' }) } catch { format = ytdl.chooseFormat(info.formats, { quality: 'lowest', filter: 'audioandvideo' }) }
-        const chunks = []
-        for await (const c of ytdl.downloadFromInfo(info, { format })) chunks.push(c)
-        await sock.sendMessage(jid, { video: Buffer.concat(chunks), mimetype: 'video/mp4', caption: info.videoDetails.title }, { quoted: msg })
+        const media = await ytMedia(url, (ytdl, info) => {
+          try { return ytdl.chooseFormat(info.formats, { quality: '18' }) } catch { return ytdl.chooseFormat(info.formats, { quality: 'lowest', filter: 'audioandvideo' }) }
+        })
+        const { title, lengthSeconds } = media.info.videoDetails
+        if (Number(lengthSeconds) > 600) return reply('That is longer than 10 minutes. Pick something shorter so the file stays a reasonable size.')
+        await reply(`Downloading: ${title}`)
+        const video = await ytDownload(media)
+        await sock.sendMessage(jid, { video, mimetype: 'video/mp4', caption: title }, { quoted: msg })
       } catch (e) {
         console.error('video failed:', e)
         throw new Error(explainYtdlError(e))
