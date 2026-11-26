@@ -13,7 +13,7 @@ import makeWASocket, {
   useMultiFileAuthState
 } from '@whiskeysockets/baileys'
 import { config } from '../config.js'
-import { encodeSession } from '../session.js'
+import { encodeSessionDir } from '../session.js'
 
 const logger = pino({ level: 'silent' })
 const PAGE = new URL('../../public/index.html', import.meta.url)
@@ -110,7 +110,10 @@ async function startPairing(number) {
       if (connection === 'open') {
         try {
           await saveCreds()
-          const sessionId = encodeSession(fs.readFileSync(path.join(job.dir, 'creds.json'), 'utf8'))
+          // Let the encryption keys finish writing to disk, then bundle them with the creds.
+          // Without the keys the bot connects but cannot decrypt any message.
+          await new Promise((r) => setTimeout(r, 3000))
+          const sessionId = encodeSessionDir(job.dir)
           job.status = 'linked'
           job.sessionId = sessionId
           // Also drop it in the user's own WhatsApp chat, so it is not lost if the tab closes.

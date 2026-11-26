@@ -9,7 +9,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   useMultiFileAuthState
 } from '@whiskeysockets/baileys'
-import { config, prefix, botName } from './config.js'
+import { config, prefix, botName, state as botState } from './config.js'
 import { decodeSession, readRaw, restoreSession, sessionNumber } from './session.js'
 import * as store from './store.js'
 import * as persist from './persist.js'
@@ -18,7 +18,7 @@ import { guard, onParticipants } from './protection.js'
 import { onStatus } from './status.js'
 import { remember, onRevoke } from './antidelete.js'
 
-const logger = pino({ level: process.env.LOG_LEVEL || 'silent' })
+const logger = pino({ level: process.env.LOG_LEVEL || 'error' })
 const log = (what) => (e) => console.error(`${what} error:`, e?.message ?? e)
 
 // 1. Work out which number this is, load settings, and pull newer keys from Supabase if it is set up.
@@ -34,11 +34,12 @@ store.load()
 if (id) await persist.restore(id)
 
 if (!restoreSession()) {
-  console.error('No session found. Set SESSION_ID (or create session.txt).')
+  console.error('No session found. Set SESSION_ID or paste it into session/session.txt.')
   if (config.pairSite) console.error(`Get one at ${config.pairSite}`)
   process.exit(1)
 }
 persist.start()
+console.log(`Session found. Prefix "${prefix()}", mode "${botState.mode}". Connecting...`)
 
 // Some hosts (Render, Koyeb...) need something listening on $PORT. Panels simply ignore it.
 if (process.env.PORT) http.createServer((_, res) => res.end('ok')).listen(config.port)
@@ -73,8 +74,11 @@ async function connect() {
   sock.ev.on('group-participants.update', (e) => onParticipants(sock, e).catch(log('Welcome')))
 
   sock.ev.on('messages.upsert', ({ messages, type }) => {
-    if (type !== 'notify') return
+    // 'notify' = new messages. Messages you type on the linked phone can arrive as 'append', so let those through too.
+    if (type !== 'notify' && type !== 'append') return
     for (const m of messages) {
+      console.log(`Incoming (${type}) ${m.key.fromMe ? 'from me' : 'from ' + String(m.key.participant || m.key.remoteJid).split('@')[0]} in ${m.key.remoteJid.endsWith('@g.us') ? 'group' : m.key.remoteJid === 'status@broadcast' ? 'status' : 'chat'}${m.message ? '' : ' [no content - could not decrypt]'}`)
+      if (type === 'append' && !(m.key.fromMe && Date.now() / 1000 - Number(m.messageTimestamp || 0) < 60)) continue
       if (m.key.remoteJid === 'status@broadcast') { onStatus(sock, m).catch(log('Status')); continue }
       if (!m.key.fromMe) {
         if (store.get('autoread')) sock.readMessages([m.key]).catch(() => {})
