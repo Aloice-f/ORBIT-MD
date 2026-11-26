@@ -74,11 +74,10 @@ async function connect() {
   sock.ev.on('group-participants.update', (e) => onParticipants(sock, e).catch(log('Welcome')))
 
   sock.ev.on('messages.upsert', ({ messages, type }) => {
-    // 'notify' = new messages. Messages you type on the linked phone can arrive as 'append', so let those through too.
-    if (type !== 'notify' && type !== 'append') return
+    // Only real new messages. ('append' also carries the bot's own outgoing messages and history, which must never run commands.)
+    if (type !== 'notify') return
     for (const m of messages) {
-      console.log(`Incoming (${type}) ${m.key.fromMe ? 'from me' : 'from ' + String(m.key.participant || m.key.remoteJid).split('@')[0]} in ${m.key.remoteJid.endsWith('@g.us') ? 'group' : m.key.remoteJid === 'status@broadcast' ? 'status' : 'chat'}${m.message ? '' : ' [no content - could not decrypt]'}`)
-      if (type === 'append' && !(m.key.fromMe && Date.now() / 1000 - Number(m.messageTimestamp || 0) < 60)) continue
+      console.log(`Incoming ${m.key.id?.slice(0, 8)} (${type}) ${m.key.fromMe ? 'from me' : 'from ' + String(m.key.participant || m.key.remoteJid).split('@')[0]} in ${m.key.remoteJid.endsWith('@g.us') ? 'group' : m.key.remoteJid === 'status@broadcast' ? 'status' : 'chat'}${m.message ? '' : ' [no content - could not decrypt]'}`)
       if (m.key.remoteJid === 'status@broadcast') { onStatus(sock, m).catch(log('Status')); continue }
       if (!m.key.fromMe) {
         if (store.get('autoread')) sock.readMessages([m.key]).catch(() => {})

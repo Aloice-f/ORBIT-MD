@@ -35,7 +35,7 @@ export async function handle(sock, msg) {
   const isOwner = msg.key.fromMe || digits(sender) === digits(sock.user.id) || config.owners.includes(digits(sender)) || (store.get('sudo') ?? []).includes(digits(sender))
   if (state.mode === 'private' && !isOwner) return console.log(`Ignored ${prefix()}${cmd.name} from ${digits(sender)}: MODE is private and they are not an owner`)
 
-  console.log(`Command ${prefix()}${cmd.name} from ${digits(sender)}${isOwner ? ' (owner)' : ''}`)
+  console.log(`Command ${prefix()}${cmd.name} [${msg.key.id?.slice(0, 8)}] from ${digits(sender)}${isOwner ? ' (owner)' : ''}`)
   const reply = (t, extra = {}) => sock.sendMessage(jid, { text: t, ...extra }, { quoted: msg })
   // Reactions double as a status indicator: ⏳ while the command runs, then ✅ or ❌.
   const react = (emoji) => sock.sendMessage(jid, { react: { text: emoji, key: msg.key } }).catch(() => {})
