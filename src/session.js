@@ -8,7 +8,14 @@ export const SESSION_PREFIX = 'ORBIT~'
 /** creds.json text -> "ORBIT~<gzip+base64url>" (a few KB, safe to paste anywhere). */
 export const encodeSession = (credsJson) => SESSION_PREFIX + zlib.gzipSync(credsJson).toString('base64url')
 
+<<<<<<< HEAD
 /** Session ID -> creds.json text. Tolerates quotes, spaces, line breaks and text around the ID. */
+=======
+/**
+ * Session ID -> creds.json text. Throws if it is not a valid session.
+ * Tolerant of quotes, spaces, line breaks and extra text around the ID.
+ */
+>>>>>>> 611882daddda6c5dca93c22f35e2e7953c8d8c1a
 export function decodeSession(id) {
   const m = String(id).replace(/\s+/g, '').match(/ORBIT~([A-Za-z0-9_-]+)/)
   if (!m) throw new Error('SESSION_ID must start with ORBIT~')
