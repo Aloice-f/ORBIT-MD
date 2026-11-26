@@ -1,4 +1,4 @@
-import { config } from '../config.js'
+import { config, botName } from '../config.js'
 
 const pick = (a) => a[Math.floor(Math.random() * a.length)]
 const BALL = ['Yes.', 'No.', 'Maybe.', 'Definitely.', 'Not a chance.', 'Ask again later.', 'Looks good.', 'Very doubtful.']
@@ -12,19 +12,7 @@ export default [
     name: 'alive', category: 'General', desc: 'Uptime and status',
     run: ({ reply }) => {
       const s = Math.floor(process.uptime())
-      reply(`✅ ${config.botName} is online\nUptime: ${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${s % 60}s`)
-    }
-  },
-  {
-    name: 'menu', aliases: ['help'], category: 'General', desc: 'List all commands',
-    run: ({ reply, commands }) => {
-      const groups = {}
-      for (const c of new Set(commands)) (groups[c.category] ??= []).push(c)
-      const p = config.prefix
-      const body = Object.entries(groups)
-        .map(([cat, list]) => `*${cat}*\n` + list.map((c) => `${p}${c.name} - ${c.desc}`).join('\n'))
-        .join('\n\n')
-      reply(`*${config.botName}*\n\n${body}`)
+      reply(`✅ ${botName()} is online\nUptime: ${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${s % 60}s`)
     }
   },
   {

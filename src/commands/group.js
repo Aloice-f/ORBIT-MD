@@ -1,4 +1,4 @@
-const digits = (jid = '') => String(jid).split('@')[0].split(':')[0]
+import { digits, dropMeta } from '../utils.js'
 
 /** People the command targets: @mentions first, otherwise the author of the replied-to message. */
 function targets(msg) {
@@ -10,6 +10,7 @@ const change = (action, past) => async ({ sock, msg, jid, reply }) => {
   const who = targets(msg)
   if (!who.length) return reply('Mention someone or reply to their message.')
   await sock.groupParticipantsUpdate(jid, who, action)
+  dropMeta(jid)
   reply(`Done: ${past} ${who.map((j) => '@' + digits(j)).join(', ')}`, { mentions: who })
 }
 

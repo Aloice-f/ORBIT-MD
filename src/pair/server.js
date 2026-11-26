@@ -17,6 +17,30 @@ import { encodeSession } from '../session.js'
 
 const logger = pino({ level: 'silent' })
 const PAGE = new URL('../../public/index.html', import.meta.url)
+const FILES = {
+  '/song': [new URL('../../public/song.mp3', import.meta.url), 'audio/mpeg'],
+  '/assets/menu.jpg': [new URL('../../assets/menu.jpg', import.meta.url), 'image/jpeg']
+}
+
+/** Static file with Range support (Safari needs it for audio). */
+function sendFile(req, res, [url, type]) {
+  if (!fs.existsSync(url)) return res.writeHead(404).end()
+  const size = fs.statSync(url).size
+  const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range ?? '')
+  let start = 0, end = size - 1, code = 200
+  if (m) {
+    start = m[1] ? Number(m[1]) : 0
+    end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1
+    if (start > end) return res.writeHead(416, { 'Content-Range': `bytes */${size}` }).end()
+    code = 206
+  }
+  res.writeHead(code, {
+    'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'public, max-age=86400',
+    ...(code === 206 && { 'Content-Range': `bytes ${start}-${end}/${size}` })
+  })
+  fs.createReadStream(url, { start, end }).pipe(res)
+}
+
 const LIFETIME = 3 * 60_000 // a pairing attempt is dropped after 3 minutes
 const KEEP = 5 * 60_000 // a finished session ID stays fetchable for 5 minutes, then is forgotten
 
@@ -151,7 +175,9 @@ http
     const url = req.url.split('?')[0]
     const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim()
 
-    if (url === '/health') return send(res, 200, { ok: true, active: [...jobs.values()].filter((j) => !j.done).length })
+    if (url === '/health') return send(res, 200, { ok: true, uptime: Math.floor(process.uptime()), active: [...jobs.values()].filter((j) => !j.done).length })
+
+    if (req.method === 'GET' && FILES[url]) return sendFile(req, res, FILES[url])
 
     if (req.method === 'GET' && (url === '/' || url === '/index.html')) {
       res.writeHead(200, {
@@ -159,9 +185,9 @@ http
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy':
-          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; media-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
       })
-      return res.end(fs.readFileSync(PAGE, 'utf8').replaceAll('{{BOT_NAME}}', config.botName))
+      return res.end(fs.readFileSync(PAGE, 'utf8').replaceAll('{{BOT_NAME}}', config.botName.toUpperCase().replace(/[<>&"]/g, '')).replaceAll('{{BOT_INITIAL}}', config.botName.charAt(0).toUpperCase().replace(/[<>&"]/g, '')))
     }
 
     if (req.method === 'POST' && url === '/api/pair') {
