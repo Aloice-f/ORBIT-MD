@@ -8,10 +8,14 @@ export const SESSION_PREFIX = 'ORBIT~'
 /** creds.json text -> "ORBIT~<gzip+base64url>" (a few KB, safe to paste anywhere). */
 export const encodeSession = (credsJson) => SESSION_PREFIX + zlib.gzipSync(credsJson).toString('base64url')
 
-/** Session ID -> creds.json text. Throws if it is not a valid session. */
+/**
+ * Session ID -> creds.json text. Throws if it is not a valid session.
+ * Tolerant of quotes, spaces, line breaks and extra text around the ID.
+ */
 export function decodeSession(id) {
-  const body = String(id).trim().split('~').pop()
-  const json = zlib.gunzipSync(Buffer.from(body, 'base64url')).toString()
+  const m = String(id).replace(/\s+/g, '').match(/ORBIT~([A-Za-z0-9_-]+)/)
+  if (!m) throw new Error('SESSION_ID must start with ORBIT~')
+  const json = zlib.gunzipSync(Buffer.from(m[1], 'base64url')).toString()
   const creds = JSON.parse(json)
   if (!creds?.noiseKey || !creds?.signedIdentityKey) throw new Error('Not a WhatsApp session')
   return json
