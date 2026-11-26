@@ -5,7 +5,7 @@ const digits = (v = '') => v.split(',').map((s) => s.replace(/\D/g, '')).filter(
 
 export const config = {
   botName: process.env.BOT_NAME || 'Orbit-MD',
-  ownerName: process.env.OWNER_NAME || 'Owner',
+  ownerName: process.env.OWNER_NAME || 'Captain',
   menuImage: process.env.MENU_IMAGE_URL || '',
   prefix: process.env.PREFIX || '.',
   owners: digits(process.env.OWNER_NUMBER),
