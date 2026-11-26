@@ -43,13 +43,21 @@ function explainYtdlError(e) {
 // This tries several "player clients" in turn and stops at the first one that returns a usable format.
 // Optional: put exported YouTube cookies (JSON array) in the YT_COOKIES variable or a cookies.json file
 // next to package.json. That fixes the "Sign in to confirm you're not a bot" block on most hosts.
+// Different ytdl-core releases export themselves differently (default export, named exports, or nested default).
+// This finds the object that actually has getInfo, so a version change never breaks the import.
+async function loadYtdl() {
+  const mod = await import('@distube/ytdl-core')
+  for (const c of [mod.default, mod.default?.default, mod]) if (typeof c?.getInfo === 'function') return c
+  throw new Error('ytdl-core loaded but has no getInfo (exports: ' + Object.keys(mod).join(', ') + ')')
+}
+
 let ytAgent
 function getAgent(ytdl) {
   if (ytAgent !== undefined) return ytAgent
   ytAgent = null
   try {
     const raw = process.env.YT_COOKIES || (fs.existsSync('cookies.json') ? fs.readFileSync('cookies.json', 'utf8') : '')
-    if (raw.trim()) ytAgent = ytdl.createAgent(JSON.parse(raw))
+    if (raw.trim() && typeof ytdl.createAgent === 'function') ytAgent = ytdl.createAgent(JSON.parse(raw))
   } catch (e) {
     console.error('YouTube cookies ignored (bad JSON?):', e.message)
   }
@@ -57,7 +65,7 @@ function getAgent(ytdl) {
 }
 
 async function ytMedia(url, pickFormat) {
-  const ytdl = (await import('@distube/ytdl-core')).default
+  const ytdl = await loadYtdl()
   const agent = getAgent(ytdl)
   let lastErr
   for (const playerClients of [undefined, ['IOS', 'ANDROID'], ['TV'], ['WEB_EMBEDDED']]) {
