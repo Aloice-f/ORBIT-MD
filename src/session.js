@@ -1,4 +1,3 @@
-```javascript
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
@@ -41,4 +40,3 @@ export function restoreSession() {
   fs.writeFileSync(file, decodeSession(raw))
   return true
 }
-```
