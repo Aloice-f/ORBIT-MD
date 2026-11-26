@@ -1,4 +1,6 @@
 import fs from 'node:fs'
+import path from 'node:path'
+import { execFile } from 'node:child_process'
 import pino from 'pino'
 import { downloadMediaMessage } from '@whiskeysockets/baileys'
 import { config } from '../config.js'
@@ -90,6 +92,100 @@ async function ytDownload({ ytdl, info, format, agent }) {
   return Buffer.concat(chunks)
 }
 
+// ---- yt-dlp: the main YouTube downloader (far better maintained than ytdl-core) -------------------------
+// The standalone Linux binary is fetched once into ./bin on first use, so nothing extra has to be installed.
+// Optional: YTDLP_PATH (use your own binary), YTDLP_URL (different download), cookies.txt (Netscape format) beside package.json.
+const YTDLP_BIN = path.resolve('bin', 'yt-dlp')
+let ytdlpReady
+function ensureYtdlp() {
+  ytdlpReady ??= (async () => {
+    if (process.env.YTDLP_PATH) return process.env.YTDLP_PATH
+    if (fs.existsSync(YTDLP_BIN)) return YTDLP_BIN
+    const file = process.arch === 'arm64' ? 'yt-dlp_linux_aarch64' : 'yt-dlp_linux'
+    const url = process.env.YTDLP_URL || `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${file}`
+    const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(180_000) })
+    if (!r.ok) throw new Error(`could not download yt-dlp (HTTP ${r.status})`)
+    fs.mkdirSync(path.dirname(YTDLP_BIN), { recursive: true })
+    fs.writeFileSync(YTDLP_BIN + '.part', Buffer.from(await r.arrayBuffer()))
+    fs.chmodSync(YTDLP_BIN + '.part', 0o755)
+    fs.renameSync(YTDLP_BIN + '.part', YTDLP_BIN)
+    return YTDLP_BIN
+  })().catch((e) => { ytdlpReady = undefined; throw e })
+  return ytdlpReady
+}
+
+function execBuf(bin, args) {
+  return new Promise((resolve, reject) => {
+    execFile(bin, args, { encoding: 'buffer', maxBuffer: 90 * 1024 * 1024, timeout: 150_000 }, (err, stdout, stderr) => {
+      if (!err) return resolve(stdout)
+      const lines = stderr.toString().split('\n').map((l) => l.trim()).filter(Boolean)
+      reject(new Error((lines.reverse().find((l) => /error/i.test(l)) || lines[0] || err.message).replace(/^ERROR:\s*(\[[^\]]+\]\s*)?/i, '')))
+    })
+  })
+}
+
+async function ytdlp(args) {
+  const bin = await ensureYtdlp()
+  const base = ['--no-playlist', '--no-warnings', '--no-progress']
+  if (fs.existsSync('cookies.txt')) base.push('--cookies', 'cookies.txt')
+  try {
+    return await execBuf(bin, [...base, '--js-runtimes', 'node', ...args]) // newer yt-dlp uses node to solve YouTube's player checks
+  } catch (e) {
+    if (!/no such option|unrecognized arguments/i.test(e.message)) throw e
+    return execBuf(bin, [...base, ...args]) // older yt-dlp without that flag
+  }
+}
+
+/** { title, seconds } for a link (a search result already has these). */
+async function ytInfoFor(url) {
+  const out = (await ytdlp(['--skip-download', '--print', '%(duration)s|%(title)s', url])).toString().trim().split('\n')[0]
+  const [seconds, ...t] = out.split('|')
+  return { title: t.join('|') || 'YouTube', seconds: Number(seconds) || 0 }
+}
+
+const YT_FORMATS = {
+  audio: ['-f', 'bestaudio[ext=m4a]/140', '--max-filesize', '40M'],
+  video: ['-f', '18/best[ext=mp4][height<=480]/best[ext=mp4]', '--max-filesize', '60M']
+}
+const ytdlpDownload = (url, kind) => ytdlp([...YT_FORMATS[kind], '-o', '-', url])
+
+/** yt-dlp first; if it fails, fall back to ytdl-core. Throws a readable message when both fail. */
+async function fetchYoutube(url, kind) {
+  let first
+  try {
+    const data = await ytdlpDownload(url, kind)
+    if (data.length) return data
+    first = new Error('YouTube returned an empty file')
+  } catch (e) {
+    first = e
+    console.error('yt-dlp failed:', e.message)
+  }
+  try {
+    const media = await ytMedia(url, kind === 'audio'
+      ? (ytdl, info) => { try { return ytdl.chooseFormat(info.formats, { quality: '140' }) } catch { return ytdl.chooseFormat(info.formats, { quality: 'highestaudio' }) } }
+      : (ytdl, info) => { try { return ytdl.chooseFormat(info.formats, { quality: '18' }) } catch { return ytdl.chooseFormat(info.formats, { quality: 'lowest', filter: 'audioandvideo' }) } })
+    return await ytDownload(media)
+  } catch (e2) {
+    console.error('ytdl-core fallback failed:', e2.message)
+    throw new Error(explainYoutube(first))
+  }
+}
+
+function explainYoutube(e) {
+  const m = e?.message || String(e)
+  if (/Sign in to confirm|not a bot|cookies/i.test(m)) return 'YouTube is blocking this server as a bot. Add a cookies.txt (exported from a logged-in browser) next to package.json, or try again later.'
+  if (/could not download yt-dlp|ENOTFOUND|fetch failed|EACCES|ENOENT|spawn/i.test(m)) return `The yt-dlp downloader could not start (${m}). Check the host has internet access and allows running files from the bot folder.`
+  if (/unavailable|private|removed|not available/i.test(m)) return 'That video is unavailable (private, removed or blocked in this region). Try another.'
+  if (/larger than|max-filesize|filesize/i.test(m)) return 'That file is too large to send. Pick something shorter.'
+  return m
+}
+
+async function pickVideo(text) {
+  if (/^https?:\/\//.test(text)) return { url: text, ...(await ytInfoFor(text)) }
+  const v = await firstVideo(text)
+  return v && { url: v.url, title: v.title, seconds: v.seconds }
+}
+
 export default [
   {
     name: 'ai', aliases: ['gpt', 'ask'], category: 'AI', desc: 'Ask the AI anything',
@@ -127,19 +223,15 @@ export default [
     run: async ({ sock, jid, msg, text, reply }) => {
       if (!text) return reply('Which song? e.g. .play burna boy last last')
       try {
-        const url = /^https?:\/\//.test(text) ? text : (await firstVideo(text))?.url
-        if (!url) return reply('I could not find that song.')
-        const media = await ytMedia(url, (ytdl, info) => {
-          try { return ytdl.chooseFormat(info.formats, { quality: '140' }) } catch { return ytdl.chooseFormat(info.formats, { quality: 'highestaudio' }) }
-        })
-        const { title, lengthSeconds } = media.info.videoDetails
-        if (Number(lengthSeconds) > 900) return reply('That is longer than 15 minutes. Pick something shorter.')
-        await reply(`Downloading: ${title}`)
-        const audio = await ytDownload(media)
-        await sock.sendMessage(jid, { audio, mimetype: 'audio/mp4', fileName: title + '.m4a' }, { quoted: msg })
+        const v = await pickVideo(text)
+        if (!v) return reply('I could not find that song.')
+        if (v.seconds > 900) return reply('That is longer than 15 minutes. Pick something shorter.')
+        await reply(`Downloading: ${v.title}`)
+        const audio = await fetchYoutube(v.url, 'audio')
+        await sock.sendMessage(jid, { audio, mimetype: 'audio/mp4', fileName: v.title + '.m4a' }, { quoted: msg })
       } catch (e) {
         console.error('play failed:', e)
-        throw new Error(explainYtdlError(e))
+        throw new Error(explainYoutube(e))
       }
     }
   },
@@ -148,19 +240,15 @@ export default [
     run: async ({ sock, jid, msg, text, reply }) => {
       if (!text) return reply('Which video? e.g. .video funny cat compilation')
       try {
-        const url = /^https?:\/\//.test(text) ? text : (await firstVideo(text))?.url
-        if (!url) return reply('I could not find that video.')
-        const media = await ytMedia(url, (ytdl, info) => {
-          try { return ytdl.chooseFormat(info.formats, { quality: '18' }) } catch { return ytdl.chooseFormat(info.formats, { quality: 'lowest', filter: 'audioandvideo' }) }
-        })
-        const { title, lengthSeconds } = media.info.videoDetails
-        if (Number(lengthSeconds) > 600) return reply('That is longer than 10 minutes. Pick something shorter so the file stays a reasonable size.')
-        await reply(`Downloading: ${title}`)
-        const video = await ytDownload(media)
-        await sock.sendMessage(jid, { video, mimetype: 'video/mp4', caption: title }, { quoted: msg })
+        const v = await pickVideo(text)
+        if (!v) return reply('I could not find that video.')
+        if (v.seconds > 600) return reply('That is longer than 10 minutes. Pick something shorter so the file stays a reasonable size.')
+        await reply(`Downloading: ${v.title}`)
+        const video = await fetchYoutube(v.url, 'video')
+        await sock.sendMessage(jid, { video, mimetype: 'video/mp4', caption: v.title }, { quoted: msg })
       } catch (e) {
         console.error('video failed:', e)
-        throw new Error(explainYtdlError(e))
+        throw new Error(explainYoutube(e))
       }
     }
   },
