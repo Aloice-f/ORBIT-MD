@@ -41,6 +41,6 @@ export async function handle(sock, msg) {
   } catch (e) {
     console.error(`Command ${cmd.name} failed:`, e.message)
     await react('❌')
-    reply(`That did not work (${cmd.name}). Try again in a moment.`).catch(() => {})
+    reply(`${cmd.name} failed: ${e.message}`).catch(() => {})
   }
 }
