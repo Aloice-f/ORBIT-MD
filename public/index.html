@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{BOT_NAME}} · Get your session ID</title>
+<style>
+:root{--bg:#eef1f8;--ink:#0d1233;--muted:#555c85;--blue:#2a3cff;--onblue:#fff;--line:#c4cbe6;--card:#fff;--tile:#ffc93c;--tileink:#1b1500;--ok:#0b7a4b}
+@media (prefers-color-scheme:dark){:root{--bg:#0c1030;--ink:#edefff;--muted:#9aa2d6;--blue:#8a95ff;--onblue:#0c1030;--line:#272e66;--card:#141947;--ok:#52d99a}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Avenir Next","Segoe UI",system-ui,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:0 20px}
+header{padding:22px 0;font-weight:700;letter-spacing:.01em}
+h1,h2{font-family:Georgia,"Iowan Old Style",serif;line-height:1.08;margin:0}
+h1{font-size:clamp(2.3rem,6vw,3.8rem);letter-spacing:-.02em}
+h2{font-size:1.7rem;margin-bottom:14px}
+p{margin:0 0 14px}
+.muted{color:var(--muted)}
+.hero{display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:center;padding:28px 0 64px}
+@media(max-width:820px){.hero{grid-template-columns:1fr;gap:28px}}
+.hero p{font-size:1.1rem;max-width:46ch;margin-top:18px}
+/* the ticket: the pairing code is the one memorable thing on the page */
+.ticket{background:var(--card);border:2px solid var(--ink);border-radius:18px;position:relative;box-shadow:8px 8px 0 var(--blue)}
+.codebar{padding:26px 18px 22px;display:flex;justify-content:center;align-items:center;gap:6px;flex-wrap:nowrap}
+.tile{width:clamp(30px,8.6vw,42px);height:clamp(42px,11vw,56px);display:grid;place-items:center;border-radius:8px;background:transparent;border:2px dashed var(--line);font:700 clamp(1.3rem,5vw,1.9rem) ui-monospace,Menlo,Consolas,monospace;color:var(--tileink)}
+.tile.on{background:var(--tile);border:2px solid var(--ink);animation:flip .45s both;animation-delay:calc(var(--i)*70ms)}
+.dash{width:10px;height:3px;background:var(--line);border-radius:2px;margin:0 4px}
+@keyframes flip{from{transform:rotateX(90deg);opacity:0}to{transform:none;opacity:1}}
+.perf{border-top:2px dashed var(--line);position:relative;margin:0 14px}
+.perf::before,.perf::after{content:"";position:absolute;top:-14px;width:26px;height:26px;border-radius:50%;background:var(--bg);border:2px solid var(--ink)}
+.perf::before{left:-29px;clip-path:inset(0 0 0 50%)}.perf::after{right:-29px;clip-path:inset(0 50% 0 0)}
+.stage{padding:22px 22px 24px}
+label{display:block;font-weight:600;margin-bottom:6px}
+input,textarea{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:2px solid var(--line);border-radius:10px;padding:12px 14px}
+input:focus-visible,textarea:focus-visible,button:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+button{font:inherit;font-weight:700;cursor:pointer;border-radius:10px;border:2px solid var(--ink);padding:11px 16px;background:var(--blue);color:var(--onblue)}
+button.ghost{background:transparent;color:var(--ink)}
+button:disabled{opacity:.6;cursor:wait}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.err{color:#d6284a;margin:10px 0 0;min-height:1.4em;font-weight:600}
+@media(prefers-color-scheme:dark){.err{color:#ff8aa1}}
+.steps{margin:0;padding-left:20px}.steps li{margin-bottom:8px}
+.timer{font-variant-numeric:tabular-nums;font-weight:700}
+.ok{color:var(--ok);font-weight:700}
+textarea{font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;height:110px;resize:vertical;word-break:break-all}
+section{padding:46px 0;border-top:2px solid var(--line)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.tabs button{background:transparent;color:var(--ink);border-color:var(--line)}
+.tabs button[aria-selected=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+pre{background:var(--card);border:2px solid var(--line);border-radius:12px;padding:14px;overflow-x:auto;font:13.5px/1.5 ui-monospace,Menlo,Consolas,monospace;margin:12px 0}
+.panel ol{padding-left:20px;margin:0}.panel li{margin-bottom:8px}
+dl{margin:0;display:grid;grid-template-columns:minmax(0,220px) 1fr;gap:18px 28px}
+@media(max-width:700px){dl{grid-template-columns:1fr;gap:4px}dd{margin-bottom:14px!important}}
+dt{font-weight:700}dd{margin:0}
+footer{padding:30px 0 50px;color:var(--muted);font-size:.9rem}
+[hidden]{display:none!important}
+@media(prefers-reduced-motion:reduce){.tile.on{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>{{BOT_NAME}}</header>
+
+<div class="hero">
+  <div>
+    <h1>Link your number once. Run the bot anywhere.</h1>
+    <p>Type your WhatsApp number, enter the code on your phone, and you get a session ID you can paste into any bot host. Nothing is saved on this server.</p>
+  </div>
+
+  <div class="ticket" aria-live="polite">
+    <div class="codebar" id="tiles" aria-label="Pairing code"></div>
+    <div class="perf"></div>
+
+    <div class="stage" data-stage="form">
+      <form id="form" novalidate>
+        <label for="num">WhatsApp number with country code</label>
+        <input id="num" inputmode="numeric" autocomplete="tel" placeholder="254712345678" required>
+        <p class="muted" style="margin:6px 0 0;font-size:.9rem">Digits only, no + and no leading 0.</p>
+        <div class="row"><button id="go" type="submit">Get pairing code</button></div>
+        <p class="err" id="err" role="alert"></p>
+      </form>
+    </div>
+
+    <div class="stage" data-stage="code" hidden>
+      <p style="margin-bottom:8px"><strong>Enter this code in WhatsApp</strong> <span class="muted">(valid about <span class="timer" id="timer">2:00</span>)</span></p>
+      <ol class="steps">
+        <li>Open WhatsApp, then <strong>Settings → Linked devices</strong>.</li>
+        <li>Tap <strong>Link a device</strong>, then <strong>Link with phone number instead</strong>.</li>
+        <li>Type the code shown above. This page updates by itself.</li>
+      </ol>
+      <div class="row"><button class="ghost" type="button" data-reset>Start over</button></div>
+    </div>
+
+    <div class="stage" data-stage="done" hidden>
+      <p class="ok">Linked. Here is your session ID.</p>
+      <textarea id="sid" readonly aria-label="Session ID"></textarea>
+      <div class="row">
+        <button type="button" id="copy">Copy session ID</button>
+        <button class="ghost" type="button" id="dl">Download .txt</button>
+        <button class="ghost" type="button" data-reset>Link another number</button>
+      </div>
+      <p class="muted" style="margin:12px 0 0;font-size:.9rem">A copy was also sent to your own WhatsApp chat. Keep it private: it works like a password.</p>
+    </div>
+  </div>
+</div>
+
+<section id="deploy">
+  <h2>Deploy with your session ID</h2>
+  <p class="muted">Pick where the bot will run. The values below fill in your session ID once you have one.</p>
+  <div class="tabs" role="tablist" id="tabs">
+    <button role="tab" aria-selected="true" data-t="panel">Katabump and panel hosts</button>
+    <button role="tab" aria-selected="false" data-t="cloud">Render, Railway, Koyeb</button>
+    <button role="tab" aria-selected="false" data-t="vps">VPS or your PC</button>
+  </div>
+
+  <div class="panel" data-p="panel">
+    <ol>
+      <li>Create a Node.js server on the host and upload this project (or point it at your Git repository).</li>
+      <li>Set the startup command to <code>npm start</code> (or the main file <code>src/index.js</code>) with Node 20 or newer.</li>
+      <li>Add the variables below in the host's Variables or Startup tab, then start the server.</li>
+      <li>If the panel rejects a value this long, save the session ID in a file named <code>session.txt</code> in the project folder instead.</li>
+    </ol>
+  </div>
+  <div class="panel" data-p="cloud" hidden>
+    <ol>
+      <li>Create a web service from your repository. Build command <code>npm install</code>, start command <code>npm start</code>.</li>
+      <li>Add the variables below as environment variables. The bot listens on <code>$PORT</code> automatically, so health checks pass.</li>
+      <li>Free plans may sleep without traffic; ping <code>/</code> from an uptime monitor if the bot goes quiet.</li>
+    </ol>
+  </div>
+  <div class="panel" data-p="vps" hidden>
+    <ol>
+      <li>Install Node 20 or newer, clone the project, run <code>npm install</code>.</li>
+      <li>Copy <code>.env.example</code> to <code>.env</code>, fill in the variables below, then run <code>npm start</code>.</li>
+      <li>Keep it alive with <code>pm2 start npm --name bot -- start</code>.</li>
+    </ol>
+  </div>
+
+  <pre id="env">SESSION_ID=ORBIT~paste-your-session-id-here
+OWNER_NUMBER=254712345678
+PREFIX=.
+MODE=public</pre>
+  <button class="ghost" type="button" id="copyenv">Copy variables</button>
+</section>
+
+<section>
+  <h2>Good to know</h2>
+  <dl>
+    <dt>The session ID is a login</dt>
+    <dd>Whoever holds it can read and send messages as that number. Never post it in a group or a public repository. To cut it off, remove the device under Settings → Linked devices.</dd>
+    <dt>Nothing is stored</dt>
+    <dd>Pairing runs in a temporary folder that is deleted when it ends. The session ID stays in server memory for a few minutes so your browser can collect it, then it is forgotten.</dd>
+    <dt>Run it in one place</dt>
+    <dd>If the same session connects from two hosts, one of them is disconnected. Stop the old host before starting a new one.</dd>
+    <dt>Use a spare number if you can</dt>
+    <dd>This works through an unofficial WhatsApp library, and WhatsApp can restrict numbers that behave like bots.</dd>
+  </dl>
+</section>
+<footer>{{BOT_NAME}}. Not affiliated with WhatsApp or Meta.</footer>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s)
+const ENV = (sid) => `SESSION_ID=${sid || 'ORBIT~paste-your-session-id-here'}\nOWNER_NUMBER=${$('#num').value.replace(/\D/g, '') || '254712345678'}\nPREFIX=.\nMODE=public`
+let job = null, poll = null, tick = null, session = ''
+
+function tiles(code = '') {
+  const c = code.replace('-', '').split('')
+  const t = (i) => `<div class="tile${c[i] ? ' on' : ''}" style="--i:${i}">${c[i] || ''}</div>`
+  $('#tiles').innerHTML = [0, 1, 2, 3].map(t).join('') + '<span class="dash"></span>' + [4, 5, 6, 7].map(t).join('')
+}
+function show(name) { document.querySelectorAll('[data-stage]').forEach((e) => (e.hidden = e.dataset.stage !== name)) }
+function reset() {
+  clearTimeout(poll); clearInterval(tick); job = null
+  tiles(); show('form'); $('#err').textContent = ''; $('#go').disabled = false
+}
+function fail(msg) { reset(); $('#err').textContent = msg }
+
+async function check() {
+  try {
+    const r = await fetch('/api/pair/' + job)
+    const d = await r.json()
+    if (d.status === 'linked') return done(d.sessionId)
+    if (d.status === 'error' || d.status === 'expired' || r.status === 404) return fail(d.error || 'The code expired. Request a new one.')
+  } catch {}
+  poll = setTimeout(check, 2000)
+}
+function done(sid) {
+  clearInterval(tick); session = sid
+  $('#sid').value = sid; $('#env').textContent = ENV(sid)
+  show('done')
+}
+
+$('#form').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  $('#err').textContent = ''; $('#go').disabled = true
+  try {
+    const r = await fetch('/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number: $('#num').value }) })
+    const d = await r.json()
+    if (!r.ok) throw new Error(d.error || 'Something went wrong.')
+    job = d.id; tiles(d.code); show('code')
+    let left = d.expiresIn
+    clearInterval(tick)
+    tick = setInterval(() => {
+      left = Math.max(0, left - 1)
+      $('#timer').textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0')
+    }, 1000)
+    check()
+  } catch (x) { $('#err').textContent = x.message; $('#go').disabled = false }
+})
+
+document.querySelectorAll('[data-reset]').forEach((b) => b.addEventListener('click', reset))
+const copy = async (text, btn) => {
+  try { await navigator.clipboard.writeText(text) } catch { const t = document.createElement('textarea'); t.value = text; document.body.append(t); t.select(); document.execCommand('copy'); t.remove() }
+  const old = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => (btn.textContent = old), 1500)
+}
+$('#copy').onclick = (e) => copy(session, e.target)
+$('#copyenv').onclick = (e) => copy($('#env').textContent, e.target)
+$('#dl').onclick = () => {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([session], { type: 'text/plain' })); a.download = 'session.txt'; a.click()
+}
+$('#tabs').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-t]'); if (!t) return
+  document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', b === t))
+  document.querySelectorAll('[data-p]').forEach((p) => (p.hidden = p.dataset.p !== t.dataset.t))
+})
+$('#num').addEventListener('input', () => { if (!session) $('#env').textContent = ENV('') })
+tiles()
+</script>
+</body>
+</html>
