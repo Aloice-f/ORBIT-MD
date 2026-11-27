@@ -5,12 +5,18 @@ import { config } from './config.js'
 
 export const SESSION_PREFIX = 'ORBIT~'
 
+// Only these files travel inside a session ID: the login (creds), the one-time keys WhatsApp already holds
+// (pre-keys) and sync data. Conversation state (session-*, sender-key-*) is deliberately left out: the pairing
+// site keeps using it for a moment after the copy is taken, so the copy goes stale and every message then fails
+// with "Bad MAC". Without it the bot simply sets up fresh conversations with your phone and contacts.
+const KEEP = /^(creds|pre-key-\d+|app-state-sync-key-[\w.=-]+|app-state-sync-version-[\w.=-]+|lid-mapping-[\w.=-]+)\.json$/
+
 /** Every file in an auth folder (creds.json plus the encryption keys WhatsApp already knows about) -> "ORBIT~...". */
 export function encodeSessionDir(dir) {
   const files = {}
   for (const name of fs.readdirSync(dir)) {
     const file = path.join(dir, name)
-    if (/^[\w.-]+\.json$/.test(name) && fs.statSync(file).isFile()) files[name] = fs.readFileSync(file, 'utf8')
+    if (KEEP.test(name) && fs.statSync(file).isFile()) files[name] = fs.readFileSync(file, 'utf8')
   }
   if (!files['creds.json']) throw new Error('creds.json missing')
   return SESSION_PREFIX + zlib.gzipSync(JSON.stringify({ v: 2, files })).toString('base64url')
@@ -84,7 +90,7 @@ export function restoreSession(raw = readRaw(), dir = config.authDir) {
   if (!String(raw).trim()) return false
   fs.mkdirSync(dir, { recursive: true })
   for (const [name, text] of Object.entries(decodeFiles(raw))) {
-    if (!/^[\w.-]+\.json$/.test(name)) continue // never write outside the auth folder
+    if (!KEEP.test(name)) continue // never write outside the auth folder, and drop stale conversation state from older IDs
     fs.writeFileSync(path.join(dir, name), text)
   }
   return true
