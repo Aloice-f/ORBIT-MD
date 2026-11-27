@@ -37,31 +37,55 @@ export const decodeSession = (id) => decodeFiles(id)['creds.json']
 /** The WhatsApp number inside a session (used to key backups). */
 export const sessionNumber = (credsJson) => String(JSON.parse(credsJson).me?.id ?? 'default').split(/[:@]/)[0]
 
-/** The raw SESSION_ID value, from the environment or session.txt ('' if none). */
-export const readRaw = () => {
-  if (process.env.SESSION_ID) return process.env.SESSION_ID
-  for (const f of ['session/session.txt', 'session.txt']) {
-    if (fs.existsSync(f)) {
-      const text = fs.readFileSync(f, 'utf8')
-      if (text.trim()) return text
-    }
+/** The raw SESSION_ID value, from the environment or session.txt ('' if none). Kept for older code. */
+export const readRaw = () => readAllRaw()[0] ?? ''
+
+/**
+ * Every session ID found in: the SESSION_ID / SESSION_IDS variables, session/*.txt and session.txt.
+ * IDs can be on separate lines, separated by spaces or commas, or all pasted together. Duplicates are dropped.
+ */
+export function readAllRaw() {
+  const sources = [process.env.SESSION_ID, process.env.SESSION_IDS]
+  const files = ['session.txt']
+  try {
+    for (const f of fs.readdirSync('session').sort()) if (f.toLowerCase().endsWith('.txt')) files.push(path.join('session', f))
+  } catch {}
+  for (const f of files) {
+    try { if (fs.existsSync(f)) sources.push(fs.readFileSync(f, 'utf8')) } catch {}
   }
-  return ''
+  const ids = new Set()
+  for (const src of sources) for (const m of String(src ?? '').matchAll(/ORBIT~[A-Za-z0-9_-]+/g)) ids.add(m[0])
+  return [...ids]
+}
+
+/** Valid sessions as [{ raw, number }] (one per WhatsApp number). Invalid IDs are reported and skipped. */
+export function listSessions() {
+  const out = []
+  const seen = new Set()
+  readAllRaw().forEach((raw, i) => {
+    try {
+      const number = sessionNumber(decodeSession(raw))
+      if (seen.has(number)) return console.error(`Session #${i + 1} is the same number (${number}) as an earlier one; skipped.`)
+      seen.add(number)
+      out.push({ raw, number })
+    } catch (e) {
+      console.error(`Session #${i + 1} is not valid and was skipped: ${e.message}`)
+    }
+  })
+  return out
 }
 
 /**
- * Make sure auth/creds.json exists. Local creds (including ones restored from Supabase) win
- * over SESSION_ID, so newer keys are never reset to the pasted copy. True when a session exists.
+ * Make sure <dir>/creds.json exists. Local creds (including ones restored from Supabase) win
+ * over the pasted session, so newer keys are never reset to the pasted copy. True when a session exists.
  */
-export function restoreSession() {
-  const file = path.join(config.authDir, 'creds.json')
-  if (fs.existsSync(file)) return true
-  const raw = readRaw()
-  if (!raw.trim()) return false
-  fs.mkdirSync(config.authDir, { recursive: true })
+export function restoreSession(raw = readRaw(), dir = config.authDir) {
+  if (fs.existsSync(path.join(dir, 'creds.json'))) return true
+  if (!String(raw).trim()) return false
+  fs.mkdirSync(dir, { recursive: true })
   for (const [name, text] of Object.entries(decodeFiles(raw))) {
     if (!/^[\w.-]+\.json$/.test(name)) continue // never write outside the auth folder
-    fs.writeFileSync(path.join(config.authDir, name), text)
+    fs.writeFileSync(path.join(dir, name), text)
   }
   return true
 }
