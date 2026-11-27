@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { jidNormalizedUser } from '@whiskeysockets/baileys'
 import { config, state, prefix } from './config.js'
 import * as store from './store.js'
@@ -5,16 +7,24 @@ import { commands, byName } from './commands/index.js'
 import { digits, textOf, getMeta, isAdminIn } from './utils.js'
 
 // Each message may run a command only once. WhatsApp can deliver the same message more than once
-// (a retry after a decrypt error, or both as 'notify' and 'append'), and after a restart it replays
-// messages the bot already answered. So: remember handled message ids, and ignore anything older than this start.
+// (a retry after a decrypt error), and after a restart or crash it replays messages the bot already answered.
+// So: remember handled message ids ON DISK (they survive a restart), and ignore anything older than this start.
 const BOOT = Date.now() / 1000
+const HANDLED_FILE = path.join(process.env.DATA_DIR || 'data', 'handled.json')
 const handled = new Map()
+try {
+  for (const [id, t] of Object.entries(JSON.parse(fs.readFileSync(HANDLED_FILE, 'utf8')))) if (Date.now() - t < 900_000) handled.set(id, t)
+} catch {}
 function alreadyHandled(msg) {
   const now = Date.now()
-  for (const [id, t] of handled) if (now - t > 600_000) handled.delete(id)
+  for (const [id, t] of handled) if (now - t > 900_000) handled.delete(id)
   const id = `${msg.key.remoteJid}|${msg.key.id}`
   if (handled.has(id)) return true
   handled.set(id, now)
+  try { // written before the command runs, so even a crash mid-command cannot cause a re-run
+    fs.mkdirSync(path.dirname(HANDLED_FILE), { recursive: true })
+    fs.writeFileSync(HANDLED_FILE, JSON.stringify(Object.fromEntries(handled)))
+  } catch {}
   return false
 }
 
