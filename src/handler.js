@@ -50,13 +50,15 @@ export async function handle(sock, msg) {
     if (cmd.botAdmin && !isAdminIn(meta, sock.user.id)) return reply('Make me a group admin first.')
   }
 
-  await react('⏳')
+  // Start the command straight away. The ⏳ reaction is sent alongside it (not before it), and the final ✅/❌
+  // always follows it, so the answer is never held up waiting for a reaction to go out.
+  const started = react('⏳')
   try {
     await cmd.run({ sock, msg, jid, args, text: args.join(' '), reply, sender, isOwner, meta, commands })
-    await react('✅')
+    started.then(() => react('✅'))
   } catch (e) {
     console.error(`Command ${cmd.name} failed:`, e.message)
-    await react('❌')
+    started.then(() => react('❌'))
     reply(`${cmd.name} failed: ${e.message}`).catch(() => {})
   }
 }

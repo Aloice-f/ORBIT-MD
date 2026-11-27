@@ -27,6 +27,10 @@ export async function getMeta(sock, jid) {
   return meta
 }
 export const dropMeta = (jid) => cache.delete(jid)
+/** Store group info we already have (from WhatsApp events or a bulk fetch). */
+export const putMeta = (jid, meta) => cache.set(jid, { meta, t: Date.now() })
+/** Cached group info for Baileys, so sending to a group does not need a lookup first. Kept in step by group events. */
+export const peekMeta = (jid) => { const hit = cache.get(jid); return hit && Date.now() - hit.t < 600_000 ? hit.meta : undefined }
 
 export const isAdminIn = (meta, jid) =>
   meta.participants.some((p) => p.admin && [p.id, p.jid].some((x) => x && digits(x) === digits(jid)))

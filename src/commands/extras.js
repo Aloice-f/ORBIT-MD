@@ -124,10 +124,20 @@ function execBuf(bin, args) {
   })
 }
 
+// cookies.txt only counts once real cookie lines are in it (lines that are not comments).
+function hasCookies() {
+  try { return fs.readFileSync('cookies.txt', 'utf8').split('\n').some((l) => l.trim() && !l.startsWith('#')) } catch { return false }
+}
+let cookieNoted
+setTimeout(() => ensureYtdlp().catch(() => {}), 8000) // pre-fetch the downloader shortly after start; ignored if offline
+
 async function ytdlp(args) {
   const bin = await ensureYtdlp()
   const base = ['--no-playlist', '--no-warnings', '--no-progress']
-  if (fs.existsSync('cookies.txt')) base.push('--cookies', 'cookies.txt')
+  if (hasCookies()) {
+    base.push('--cookies', 'cookies.txt')
+    if (!cookieNoted) { cookieNoted = true; console.log('yt-dlp: using cookies.txt') }
+  }
   if (process.env.YT_PROXY) base.push('--proxy', process.env.YT_PROXY)
   try {
     return await execBuf(bin, [...base, '--js-runtimes', 'node', ...args]) // newer yt-dlp uses node to solve YouTube's player checks

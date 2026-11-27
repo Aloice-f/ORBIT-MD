@@ -17,6 +17,7 @@ import { handle } from './handler.js'
 import { guard, onParticipants } from './protection.js'
 import { onStatus } from './status.js'
 import { remember, onRevoke } from './antidelete.js'
+import { textOf, putMeta, peekMeta } from './utils.js'
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'error' })
 const log = (what) => (e) => console.error(`${what} error:`, e?.message ?? e)
@@ -68,6 +69,10 @@ async function connect(session) {
     browser: Browsers.ubuntu('Chrome'),
     printQRInTerminal: false,
     markOnlineOnConnect: false,
+    // Speed: skip downloading old chat history at login, and answer group lookups from our own cache.
+    syncFullHistory: false,
+    shouldSyncHistoryMessage: () => false,
+    cachedGroupMetadata: async (jid) => peekMeta(jid),
     auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) }
   })
 
@@ -81,12 +86,14 @@ async function connect(session) {
     }
   })
   sock.ev.on('group-participants.update', (e) => onParticipants(sock, e).catch(log('Welcome')))
+  sock.ev.on('groups.upsert', (gs) => gs.forEach((g) => putMeta(g.id, g)))
+  sock.ev.on('groups.update', (us) => us.forEach((u) => { const cur = peekMeta(u.id); if (cur) putMeta(u.id, { ...cur, ...u }) }))
 
   sock.ev.on('messages.upsert', ({ messages, type }) => {
     // Only real new messages. ('append' also carries the bot's own outgoing messages and history, which must never run commands.)
     if (type !== 'notify') return
     for (const m of messages) {
-      console.log(`${tag}Incoming ${m.key.id?.slice(0, 8)} (${type}) ${m.key.fromMe ? 'from me' : 'from ' + String(m.key.participant || m.key.remoteJid).split('@')[0]} in ${m.key.remoteJid.endsWith('@g.us') ? 'group' : m.key.remoteJid === 'status@broadcast' ? 'status' : 'chat'}${m.message ? '' : ' [no content - could not decrypt]'}`)
+      if (!m.message || textOf(m).startsWith(prefix())) console.log(`${tag}Incoming ${m.key.id?.slice(0, 8)} (${type}) ${m.key.fromMe ? 'from me' : 'from ' + String(m.key.participant || m.key.remoteJid).split('@')[0]} in ${m.key.remoteJid.endsWith('@g.us') ? 'group' : m.key.remoteJid === 'status@broadcast' ? 'status' : 'chat'}${m.message ? '' : ' [no content - could not decrypt]'}`)
       if (m.key.remoteJid === 'status@broadcast') { onStatus(sock, m).catch(log('Status')); continue }
       if (!m.key.fromMe) {
         if (store.get('autoread')) sock.readMessages([m.key]).catch(() => {})
@@ -104,6 +111,7 @@ async function connect(session) {
   sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
     if (connection === 'open') {
       console.log(`${tag}${botName()} connected as ${sock.user.id.split(':')[0]}`)
+      sock.groupFetchAllParticipating().then((all) => Object.values(all).forEach((g) => putMeta(g.id, g))).catch(() => {}) // fill the group cache in the background
       if (!announced) {
         announced = true
         sock
