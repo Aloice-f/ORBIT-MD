@@ -1,0 +1,69 @@
+services:
+  # ---------------------------------------------------------------
+  # 1) Pairing website  (npm run pair)
+  #    Visitors enter their number and get a SESSION_ID.
+  # ---------------------------------------------------------------
+  - type: web
+    name: orbit-md-pair
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run pair
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: MAX_PAIRINGS
+        value: 10
+
+  # ---------------------------------------------------------------
+  # 2) The WhatsApp bot  (npm start)
+  #    Runs as a background worker (no public URL needed).
+  #    Needs a paid plan; the disk keeps login keys + settings
+  #    across restarts and deploys.
+  # ---------------------------------------------------------------
+  - type: worker
+    name: orbit-md-bot
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    disk:
+      name: orbit-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      # Secrets: you fill these in on the Render dashboard
+      - key: SESSION_ID
+        sync: false
+      - key: OWNER_NUMBER
+        sync: false
+      # Settings
+      - key: BOT_NAME
+        value: Orbit-MD
+      - key: OWNER_NAME
+        value: Captain
+      - key: PREFIX
+        value: "."
+      - key: MODE
+        value: public
+      - key: TIMEZONE
+        value: Africa/Nairobi
+      # Persist login + settings on the disk
+      - key: AUTH_DIR
+        value: /var/data/auth
+      - key: DATA_DIR
+        value: /var/data/data
+      # Optional: uncomment and set in the dashboard if you use them
+      # - key: PAIR_SITE_URL
+      #   sync: false
+      # - key: MENU_IMAGE_URL
+      #   sync: false
+      # - key: YT_COOKIES
+      #   sync: false
+      # - key: SUPABASE_URL
+      #   sync: false
+      # - key: SUPABASE_SERVICE_KEY
+      #   sync: false
